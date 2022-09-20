@@ -24,17 +24,17 @@ pub async fn generate_invoice(db: web::Data<Database>) -> Result<HttpResponse> {
         .await?
         .try_collect::<Vec<Organization>>()
         .await?;
-    for &organization in organizations {
+    for organization in organizations {
         let find_opts = FindOptions::builder()
             .sort(doc! {"date": -1})
             .limit(1)
             .build();
         let mut invoices = Invoice::collection(&db)
-            .find(doc! {"name": organization.name}, find_opts)
+            .find(doc! {"name": organization.clone().name}, find_opts)
             .await?
             .try_collect::<Vec<Invoice>>()
             .await?;
-        let mut from_date = organization.book_begin;
+        let mut from_date = organization.clone().book_begin;
         let to_date = DateTime::now();
         for invoice in invoices.iter_mut() {
             if invoice.draft && invoice.total_value > 0.0 {
