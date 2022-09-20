@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4.2.1"
-mongodb = "2.3.0"
+mongodb = { version = "2.2.2", features = ["bson-chrono-0_4"] }
 dotenv = "0.15.0"
 serde = { version = "1", features = ["derive"] }
 futures = { version = "0.3.21", features = ["std"], default-features = false }
+strum = { version = "0.24", features = ["derive"] }
+chrono = { version = "0.4.22" }

@@ -1,37 +1,87 @@
-//! Example code for using MongoDB with Actix.
-
-// mod model;
-// #[cfg(test)]
-// mod test;
 use actix_web::{get, web, App, HttpResponse, HttpServer};
+use chrono::NaiveDate;
 use futures::TryStreamExt;
-// use model::User;
 use mongodb::{
-    bson::{doc, Document},
-    options::ClientOptions,
+    bson::{doc, DateTime, Document},
+    options::{ClientOptions, FindOptions},
     Client, Collection, Database,
 };
 
-const ORG_NAME: &str = "organizations";
-// const COLL_NAME: &str = "users";
+// pub mod date;
+pub mod error;
+pub mod model;
+
+// use date::Date;
+use error::{Error, Result};
+use model::{
+    Invoice, Organization, OrganizationPricing, OrganizationPricingTier, OrganizationUsage,
+};
 
 #[get("/generate_invoice")]
-async fn generate_invoice(db: web::Data<Database>) -> Result<HttpResponse, String> {
-    let orgs = db
-        .collection::<Document>(ORG_NAME)
+pub async fn generate_invoice(db: web::Data<Database>) -> Result<HttpResponse> {
+    let organizations = Organization::collection(&db)
         .find(doc! {}, None)
-        .await
-        .map_err(|x| x.to_string())?
-        .try_collect::<Vec<Document>>()
-        .await
-        .map_err(|x| x.to_string())?;
-    println!("1");
-    // match collection.find_one(doc! {}, None).await {
-    //     Ok(Some(org)) => HttpResponse::Ok().json(org),
-    //     Ok(None) => HttpResponse::NotFound().body(format!("No user found with username")),
-    //     Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
-    // }
-    Ok(HttpResponse::Ok().json(orgs))
+        .await?
+        .try_collect::<Vec<Organization>>()
+        .await?;
+    for &organization in organizations {
+        let find_opts = FindOptions::builder()
+            .sort(doc! {"date": -1})
+            .limit(1)
+            .build();
+        let mut invoices = Invoice::collection(&db)
+            .find(doc! {"name": organization.name}, find_opts)
+            .await?
+            .try_collect::<Vec<Invoice>>()
+            .await?;
+        let mut from_date = organization.book_begin;
+        let to_date = DateTime::now();
+        for invoice in invoices.iter_mut() {
+            if invoice.draft && invoice.total_value > 0.0 {
+                invoice.draft = false;
+            }
+            from_date = invoice.date;
+            Invoice::collection(&db)
+                .replace_one(doc! {"_id": invoice.id}, invoice, None)
+                .await?;
+        }
+        make_invoice(&db, organization, from_date, to_date).await?;
+    }
+    Ok(HttpResponse::Ok().json(organizations))
+}
+
+async fn make_invoice(
+    db: &Database,
+    organization: Organization,
+    from_date: DateTime,
+    to_date: DateTime,
+) -> Result<()> {
+    let tax_ratio = 18;
+    if from_date > to_date {
+        let organization_usage = calculate_usage(from_date, to_date, organization.pricing).await;
+    }
+    Ok(())
+}
+
+async fn calculate_usage(
+    from_date: DateTime,
+    to_date: DateTime,
+    pricing: OrganizationPricingTier,
+) -> Vec<OrganizationUsage> {
+    let start_date = from_date;
+    let end_date = to_date;
+    while (end_date > start_date)
+        || (start_date.to_chrono().format("%m").to_string()
+            == end_date.to_chrono().format("%m").to_string())
+    {
+        let total_days = from_date.to_chrono();
+    }
+    vec![OrganizationUsage {
+        billing_period: "hello".to_string(),
+        plan: OrganizationPricingTier::Free.to_string(),
+        base_charge: 999.0,
+        additional_usage_charges: 555.0,
+    }]
 }
 
 #[actix_web::main]
@@ -47,11 +97,9 @@ async fn main() -> std::io::Result<()> {
 
     let client = Client::with_options(client_options).unwrap();
     let db = client.default_database().expect("Default database not set");
-    println!("jjjj");
     let _server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db.clone()))
-            // .service(add_user)
             .service(generate_invoice)
     })
     .bind(("127.0.0.1", 8080))?
